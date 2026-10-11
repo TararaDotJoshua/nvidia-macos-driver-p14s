@@ -203,6 +203,41 @@ class MainFlow(unittest.TestCase):
         self.assertIn("NEEDBLOCK 1", out)
 
 
+NVDEV = ("nv_device_id() {", "DROP_ARGS=")
+
+
+def nv_device(pci_text):
+    """Setup's real NVIDIA device lookup and Turing check against a stub registry: 'NVDEV TURING WANT_ARGS'."""
+    path = os.path.join(tempfile.mkdtemp(), "pci")
+    pathlib.Path(path).write_text(pci_text)
+    script = (f'ioreg() {{ cat "{path}"; }}\nWANT_ARGS=base\n' + cut(SETUP.read_text(), *NVDEV)
+              + '\necho "$NVDEV $TURING $WANT_ARGS"\n')
+    r = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    return r.stdout.strip()
+
+
+class NvDeviceId(unittest.TestCase):
+    def test_muxless_turing_3d_controller_is_found_and_gets_the_settle(self):
+        # P14s Gen 2: Iris Xe + Quadro T500 (10DE:1FBB, class 0302)
+        self.assertEqual(nv_device(pci(("IGPU@2", 0x8086, 0x9A49, VGA), ("GFX0@0", 0x10DE, 0x1FBB, D3D))),
+                         "1fbb 1 base nvrmsettle=10000")
+
+    def test_class_0380_turing_is_found(self):
+        self.assertEqual(nv_device(pci(("IGPU@2", 0x8086, 0x9A68, VGA), ("GFX0@0", 0x10DE, 0x1F9D, OTHER))),
+                         "1f9d 1 base nvrmsettle=10000")
+
+    def test_a_display_card_wins_over_a_compute_card_listed_first(self):
+        self.assertEqual(nv_device(pci(("GFX1@0", 0x10DE, 0x1FBB, D3D), ("GFX0@0", 0x10DE, 0x2D05, VGA),
+                                       ("HDAU@0,1", 0x10DE, 0x22EB, AUDIO))), "2d05 0 base")
+
+    def test_vga_turing_still_gets_the_settle(self):
+        self.assertEqual(nv_device(pci(("GFX0@0", 0x10DE, 0x2184, VGA))), "2184 1 base nvrmsettle=10000")
+
+    def test_no_nvidia_gpu(self):
+        self.assertEqual(nv_device(pci(("IGPU@2", 0x8086, 0x9A49, VGA), ("HDEF@1f,3", 0x8086, 0xA0C8, AUDIO))), "0 base")
+
+
 class FinishUpdate(unittest.TestCase):
     def test_intel_panel_laptop_keeps_the_installer_bars_and_iondrvsupport(self):
         self.assertEqual(finish(INSPIRON_119, config(**PREPARED)), (-1, 0, False))

@@ -4,15 +4,18 @@ B=7C436110-AB2A-4BBB-A880-FE41995C9F82
 # ipc_control_port_options=0: with AMFI relaxed, Firefox and other hardened apps crash at launch on their task control
 # port (10-10 chat: Firefox "instant crash", fixed by this argument); OpenCore Legacy Patcher sets it for the same reason.
 WANT_ARGS="nvfb=1 nvaccel=1 nvfbheads=4 -nvkmsnosmooth amfi_get_out_of_my_way=0x1 amfi=0x80 ipc_control_port_options=0"
-# The NVIDIA display card's PCI device id (4 hex digits), read from the registry.
+# The NVIDIA GPU's PCI device id (4 hex digits), read from the registry: the first display (VGA) controller, else the
+# first 3D or other display-class one. A muxless laptop's GPU has no outputs and is a 3D controller (class 0302: the
+# P14s Gen 2's T500, #119's GA107M), so with VGA alone it was never found and a Turing one never got nvrmsettle.
 nv_device_id() {
   ioreg -r -c IOPCIDevice -l -w0 2>/dev/null | LC_ALL=C awk '
-    function emit() { if (v && c && d != "") { print substr(d,3,2) substr(d,1,2); found=1; exit } }
+    function emit() { if (v && c && d != "") { id = substr(d,3,2) substr(d,1,2); if (c == 1 && vga == "") vga = id; if (c == 2 && other == "") other = id } }
     /\+-o / { emit(); v=0; c=0; d="" }
     /"vendor-id" = <de100000>/ { v=1 }
     /"class-code" = <00000300>/ { c=1 }
+    /"class-code" = <00(02|80)0300>/ { c=2 }
     /"device-id" = </ { if (match($0, /<[0-9a-f]+>/)) d=substr($0, RSTART+1, 4) }
-    END { if (!found) emit() }'
+    END { emit(); if (vga != "") print vga; else if (other != "") print other }'
 }
 # Turing (TU102/104/106/117 = 1E00-1FFF, TU116 = 2180-21FF) needs longer for GSP to settle before the display arms:
 # a GTX 1660 SUPER stuck at boot on the 0.5 s default and started with nvrmsettle=10000, as an RTX 2070 SUPER had
